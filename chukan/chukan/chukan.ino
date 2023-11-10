@@ -35,7 +35,7 @@ void loop()
     digitalWrite(AIN2, LOW);
     analogWrite(PWMA, 255);
     //analogWrite(PWMB, 255);
-	}
+  }
   else
   {
     //ブレーキ
@@ -46,10 +46,10 @@ void loop()
   }
 
   /*
-	if (黒線検出)
-	{
-		
-	}
+  if (黒線検出)
+  {
+
+  }
   */
 
 }
