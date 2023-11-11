@@ -191,15 +191,15 @@ double getDistance()
 
     if (duration > 0)
     {
-      duration = duration / 2; //往路にかかった時間
-      double distance = duration * speed_of_sound * 100 / 100000;
+		duration = duration / 2; //往路にかかった時間
+		double distance = duration * speed_of_sound * 100 / 100000;
 
-	  /*
-      Serial.print("Distance:");
-      Serial.print(distance);
-      Serial.println(" cm");
-	  */
+		/*
+		Serial.print("Distance:");
+		Serial.print(distance);
+		Serial.println(" cm");
+		*/
 
-      return distance;
+      	return distance;
     }
 }
