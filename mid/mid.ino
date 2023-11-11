@@ -87,7 +87,7 @@ void loop()
 		/*最初の直進*/
 		case 0:
 			/*曲がり角まで直進*/
-			if (getDistance() <= L_DISTANCE)
+			if (getDistance() >= L_DISTANCE)
 			{
 				setSpeed(255, 255);
 			}
