@@ -1,18 +1,21 @@
 /*0: Sチキ，1: Lチキ*/
-int MODE = 0;
+int MODE = 1;
 
 /*Sチキ→0: 直進，1: 成功*/
 /*Lチキ→0: 直進，1: カーブ前半，2: カーブ後半，3: 最後の直進．4: 成功*/
 int PHASE = 0;
 
+const int TEMPERATURE = 20;
+const double SPEED_OF_SOUND = 331.5 + 0.6 * TEMPERATURE;
+
 /*距離関連パラメータ*/
-const int S_DISTANCE = 60;	// Sチキでの壁との目標距離[mm]
-const int L_DISTANCE = 200; // Lチキでの曲がり始め時の壁までの距離[mm]
-const int WALL_TIMES = 10;	// 壁検知の基準回数（この回数だけ基準値を下回ったら停止）
+const int S_DISTANCE = 70;	// Sチキでの壁との目標距離[mm]
+const int L_DISTANCE = 450; // Lチキでの曲がり始め時の壁までの距離[mm]
+const int WALL_TIMES = 5;	// 壁検知の基準回数（この回数だけ基準値を下回ったら停止）
 
 /*黒線関連パラメータ*/
-const int BLACK_VALUE = 200; // 黒線検知の輝度基準値 //TODO : 値の変更
-const int BLACK_TIMES = 10;	 // 黒線検知の基準回数（この回数だけ基準値を下回ったら停止）
+const int BLACK_VALUE = 500; // 黒線検知の輝度基準値 //TODO : 値の変更
+const int BLACK_TIMES = 1;	 // 黒線検知の基準回数（この回数だけ基準値を下回ったら停止）
 
 /*超音波センサ（前）*/
 const int ECHO_F = 2;
@@ -38,10 +41,7 @@ const int PWMB = 10;
 const int DIPS = 12;
 
 /*フォトリフレクタ*/
-const int PHOTO = /*A*/ 0;
-
-/*温度センサ*/
-const int THERMO = /*A*/ 1;
+const int PHOTO = A0;
 
 /*ステッピングモータ*/
 
@@ -73,7 +73,7 @@ void setup()
 
 	pinMode(DIPS, INPUT);
 
-	MODE = digitalRead(DIPS); // DIPスイッチからモード取得
+	//MODE = digitalRead(DIPS); // DIPスイッチからモード取得
 
 	digitalWrite(LED1, LOW); // LEDをオフで初期化
 
@@ -87,33 +87,33 @@ void loop()
 	{
 		switch (PHASE)
 		{
-			case 0:
+		case 0:
+		{
+			/*壁に近づくまで直進*/
+			if (getDistance(TRIG_F, ECHO_F) > S_DISTANCE)
 			{
-				/*壁に近づくまで直進*/
-				if (getDistance(TRIG_F, ECHO_F) > S_DISTANCE)
-				{
-					goStraight();
-				}
-				else
-				{
-					wall_count++;
+				goStraight();
+			}
+			else
+			{
+				wall_count++;
 
-					/*指定回数だけ壁を検知したら停止*/
-					if (wall_count > WALL_TIMES)
-					{
-						PHASE = 1;		// 停止フェーズへ
-						setSpeed(0, 0); // ブレーキ
-						Report("Phase 0 has finished.");
-					}
+				/*指定回数だけ壁を検知したら停止*/
+				if (wall_count > WALL_TIMES)
+				{
+					PHASE = 1;		// 停止フェーズへ
+					setSpeed(0, 0); // ブレーキ
+					Report("Phase 0 has finished.");
 				}
-				break;
 			}
-			case 1:
-			{
-				success(); // 成功後の処理を繰り返す
-				Report("Mission completed.");
-				break;
-			}
+			break;
+		}
+		case 1:
+		{
+			success(); // 成功後の処理を繰り返す
+			Report("Mission completed.");
+			break;
+		}
 		}
 	}
 	/*Lチキンレース*/
@@ -121,73 +121,75 @@ void loop()
 	{
 		switch (PHASE)
 		{
-			/*直進フェーズ*/
-			case 0:
+		/*直進フェーズ*/
+		case 0:
+		{
+			/*曲がり角まで直進*/
+			if (getDistance(TRIG_F, ECHO_F) > L_DISTANCE)
 			{
-				/*曲がり角まで直進*/
-				if (getDistance(TRIG_F, ECHO_F) > L_DISTANCE)
-				{
-					goStraight();
-				}
-				else
-				{
-					// start_angle = getAngle(); // 初期角度を取得
-					wall_count++;
-
-					/*指定回数だけ壁を検知したら停止*/
-					if (wall_count > WALL_TIMES)
-					{
-						PHASE = 1; // 停止フェーズへ
-						Report("Phase 0 has finished.");
-					}
-				}
-				break;
+				goStraight();
 			}
-
-			/*カーブフェーズ*/
-			case 1:
+			else
 			{
-				if (hasCurved())
-				{
-					PHASE = 2; // 最後の直進フェーズへ
-					Report("Phase 1 has finished.");
-				}
-				else
-				{
-					Curve();
-				}
-				break;
-			}
+				// start_angle = getAngle(); // 初期角度を取得
+				wall_count++;
 
-			/*最後の直進*/
-			case 2:
+				/*指定回数だけ壁を検知したら停止*/
+				if (wall_count > WALL_TIMES)
+				{
+					PHASE = 1; // 停止フェーズへ
+					Report("Phase 0 has finished.");
+				}
+			}
+			break;
+		}
+
+		/*カーブフェーズ*/
+		case 1:
+		{
+			if (hasCurved())
 			{
-				if (getPhotoValue() <= BLACK_VALUE) // 黒線検知
-				{
-					black_count++;
-
-					/*基準回数以上黒線を検知したら停止*/
-					if (black_count >= BLACK_TIMES)
-					{
-						setSpeed(0, 0);
-						PHASE = 3; // 成功フェーズへ
-						Report("Phase 2 has finished.");
-					}
-				}
-				else // 黒線検知まで直進
-				{
-					goStraight();
-				}
-				break;
+				PHASE = 2; // 最後の直進フェーズへ
+				Report("Phase 1 has finished.");
 			}
-
-			/*成功*/
-			case 3:
+			else
 			{
-				success(); // 成功後の処理を繰り返す
-				Report("Mission completed.");
-				break;
+				Curve();
+        delay(5);
 			}
+			break;
+		}
+
+		/*最後の直進*/
+		case 2:
+		{
+			if (getPhotoValue() >= BLACK_VALUE) // 黒線検知
+			{
+				black_count++;
+
+				/*基準回数以上黒線を検知したら停止*/
+				if (black_count >= BLACK_TIMES)
+				{
+          //delay(200);
+					setSpeed(0, 0);
+					PHASE = 3; // 成功フェーズへ
+					Report("Phase 2 has finished.");
+				}
+			}
+			else // 黒線検知まで直進
+			{
+				goStraight();
+			}
+			break;
+		}
+
+		/*成功*/
+		case 3:
+		{
+			success(); // 成功後の処理を繰り返す
+      Report("Phase 3 has finished.");
+			break;
+		}
 		}
 	}
 }
@@ -234,7 +236,7 @@ void setSpeed(int L_speed, int R_speed)
 /*直進処理*/
 void goStraight()
 {
-	setSpeed(255, 255);
+	setSpeed(235, 255);
 	// TODO: 直進性
 }
 
@@ -260,7 +262,7 @@ void Curve()
 // TODO: 要編集
 bool hasCurved()
 {
-	if (R_speed == -255)
+	if (R_speed == 75)
 	{
 		return true;
 	}
@@ -298,15 +300,15 @@ double getDistance(int trig_pin, int echo_pin)
 	{
 		duration = duration / 2; // 往路にかかった時間[ms]
 
-		int temperature = getTemp();
-		double speed_of_sound = 331.5 + 0.6 * temperature;
-		double distance = duration * speed_of_sound * 100 / 100000;
+		// int temperature = getTemp();
+		double distance = duration * SPEED_OF_SOUND * 100 / 100000;
 
 		return distance;
 	}
 }
 
 /*気温[℃]を取得*/
+/*
 int getTemp()
 {
 	int temp;
@@ -316,6 +318,7 @@ int getTemp()
 
 	return temp;
 }
+*/
 
 /*シリアルモニタにて状況報告*/
 void Report(String message)
@@ -342,9 +345,11 @@ void Report(String message)
 	Serial.print("[mm]");
 	*/
 
+	/*
 	Serial.print("\t[Temperature] ");
 	Serial.print(getTemp());
 	Serial.print("[℃]");
+	*/
 
 	Serial.println("\n[Global variables]");
 	Serial.print("int R_speed: ");
@@ -353,4 +358,5 @@ void Report(String message)
 	Serial.print(black_count);
 	Serial.print("\tint wall_count: ");
 	Serial.print(wall_count);
+	Serial.print("\n");
 }
