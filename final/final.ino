@@ -3,35 +3,27 @@
 /*動作モード*/
 enum Mode
 {
-	AUTO,
-	MANUAL,
-	TEST
+	AUTO,	// 自動制御
+	MANUAL, // 遠隔操縦
+	TEST	// テスト
 };
-Mode mode = TEST;
 
-/*自動制御におけるフェーズ
-	PUSHING:        カウンターに2つのドリンクを押し込むフェーズ
-	FINDING:        テーブルに置くドリンクを発見するフェーズ
-	APPROACHING:    発見したドリンクに近づくフェーズ
-	LIFTING:        ドリンクを持ち上げるフェーズ
-	SEARCHING:      テーブルを探すフェーズ
-	CARRYING:       テーブルまでドリンクを運ぶフェーズ
-	CHECKING:       テーブルの温度とドリンクの色が一致しているか調べるフェーズ
-	PUTTING:        テーブルにドリンクを置くフェーズ
-	SUCCESS:        すべてのミッション成功後に繰り返すフェーズ
-*/
+/*自動制御におけるフェーズ*/
 enum Phase
 {
-	PUSHING,
-	FINDING,
-	APPROACHING,
-	LIFTING,
-	SEARCHING,
-	CARRYING,
-	CHECKING,
-	PUTTING,
-	SUCCESS
+	PUSHING,	 // カウンターに2つのドリンクを押し込むフェーズ
+	FINDING,	 // テーブルに置くドリンクを発見するフェーズ
+	APPROACHING, // 発見したドリンクに近づくフェーズ
+	LIFTING,	 // ドリンクを持ち上げるフェーズ
+	SEARCHING,	 // テーブルを探すフェーズ
+	CARRYING,	 // テーブルまでドリンクを運ぶフェーズ
+	CHECKING,	 // テーブルの温度とドリンクの色が一致しているか調べるフェーズ
+	PUTTING,	 // テーブルにドリンクを置くフェーズ
+	SUCCESS		 // すべてのミッション成功後に繰り返すフェーズ
 };
+
+/*初期値*/
+Mode mode = TEST;
 Phase phase = PUSHING;
 
 /*距離関連パラメータ*/
@@ -112,145 +104,145 @@ void loop()
 	{
 		switch (phase)
 		{
-			/*最初に2個のドリンクを押すフェーズ*/
-			case PUSHING:
+		/*最初に2個のドリンクを押すフェーズ*/
+		case PUSHING:
+		{
+			/*カウンターまでドリンクを入れたとき*/
+			if (isInCounter())
 			{
-				/*カウンターまでドリンクを入れたとき*/
-				if (isInCounter())
-				{
-					Report("I put two drinks on the counter.");
-					phase = FINDING;
-				}
-				else
-				{
-					// armOpen();
-					goStraight(255); // 直進
-				}
-				break;
+				Report("I put two drinks on the counter.");
+				phase = FINDING;
 			}
-
-			/*他のドリンクを探すフェーズ*/
-			case FINDING:
+			else
 			{
-				findDrink(); // ドリンクを探す
-
-				Report("I found another drink.");
-				phase = APPROACHING;
-				break;
+				// armOpen();
+				goStraight(255); // 直進
 			}
+			break;
+		}
 
-			/*検出したドリンクまで向かうフェーズ*/
-			case APPROACHING:
+		/*他のドリンクを探すフェーズ*/
+		case FINDING:
+		{
+			findDrink(); // ドリンクを探す
+
+			Report("I found another drink.");
+			phase = APPROACHING;
+			break;
+		}
+
+		/*検出したドリンクまで向かうフェーズ*/
+		case APPROACHING:
+		{
+			/*適当な距離までドリンクに近づく*/
+			if (getDistance(TRIG, ECHO) <= CARRYING_DISTANCE)
 			{
-				/*適当な距離までドリンクに近づく*/
-				if (getDistance(TRIG, ECHO) <= CARRYING_DISTANCE)
+				distance_counter++; // ノイズ対策
+				if (distance_counter >= DISTANCE_COUNT)
 				{
-					distance_counter++; // ノイズ対策
-					if (distance_counter >= DISTANCE_COUNT)
-					{
-						Report("I approached the drink.");
-						distance_counter = 0; // リセット
-						phase = LIFTING;
-					}
+					Report("I approached the drink.");
+					distance_counter = 0; // リセット
+					phase = LIFTING;
 				}
-				else
-				{
-					goStraight(255); // 直進
-				}
-				break;
 			}
-
-			/*ドリンクを持ち上げるフェーズ*/
-			case LIFTING:
+			else
 			{
-				armClose(); // アームを閉じる
-				delay(1000);
-				armUp(); // アームを上げる
+				goStraight(255); // 直進
+			}
+			break;
+		}
+
+		/*ドリンクを持ち上げるフェーズ*/
+		case LIFTING:
+		{
+			armClose(); // アームを閉じる
+			delay(1000);
+			armUp(); // アームを上げる
+			phase = SEARCHING;
+			break;
+		}
+
+		/*ドリンクを置くテーブルを探すフェーズ*/
+		case SEARCHING:
+		{
+			findTable(); // テーブルを探す
+
+			Report("I found a table.");
+			phase = CARRYING;
+			break;
+		}
+
+		/*テーブルまでドリンクを運ぶフェーズ*/
+		case CARRYING:
+		{
+			/*適当な距離までテーブルに近づく*/
+			if (getDistance(TRIG, ECHO) <= CARRYING_DISTANCE)
+			{
+				distance_counter++; // ノイズ対策
+				if (distance_counter >= DISTANCE_COUNT)
+				{
+					Report("I carried the drink.");
+					distance_counter = 0; // リセット
+					phase = CHECKING;
+				}
+			}
+			else
+			{
+				goStraight(255); // 直進
+			}
+			break;
+		}
+
+		/*テーブルの温度を調べるフェーズ*/
+		case CHECKING:
+		{
+			/*テーブルの温度とドリンクの色が一致*/
+			int temp = getTemp();
+			if ((temp >= HOT_VALUE && isBlack()) || (temp < HOT_VALUE && !isBlack()))
+			{
+				Report("The temperature of the table corresponds with the color of the drink.");
+				phase = PUTTING;
+			}
+			/*テーブルの温度とドリンクの色が一致しない*/
+			else
+			{
+				Report("The temperature of the table DOESN'T correspond with the color of the drink.");
 				phase = SEARCHING;
-				break;
 			}
+			break;
+		}
 
-			/*ドリンクを置くテーブルを探すフェーズ*/
-			case SEARCHING:
+		/*テーブルにドリンクを置くフェーズ*/
+		case PUTTING:
+		{
+			armDown(); // アームを下ろす
+			delay(1000);
+			armOpen(); // アームを開く
+			delay(1000);
+			goStraight(-255); // 後退する
+			delay(1000);
+
+			Report("I put the drink on the table.");
+
+			achievement_flag++; // 達成フラグを1増やす
+			/*2つのドリンクを正しくテーブルに乗せた*/
+			if (achievement_flag >= 2)
 			{
-				findTable(); // テーブルを探す
-
-				Report("I found a table.");
-				phase = CARRYING;
-				break;
+				Report("I have accomplished all the missions.");
+				phase = SUCCESS;
 			}
-
-			/*テーブルまでドリンクを運ぶフェーズ*/
-			case CARRYING:
+			else
 			{
-				/*適当な距離までテーブルに近づく*/
-				if (getDistance(TRIG, ECHO) <= CARRYING_DISTANCE)
-				{
-					distance_counter++; // ノイズ対策
-					if (distance_counter >= DISTANCE_COUNT)
-					{
-						Report("I carried the drink.");
-						distance_counter = 0; // リセット
-						phase = CHECKING;
-					}
-				}
-				else
-				{
-					goStraight(255); // 直進
-				}
-				break;
+				Report("I'll find the other drink.");
+				phase = FINDING;
 			}
+			break;
+		}
 
-			/*テーブルの温度を調べるフェーズ*/
-			case CHECKING:
-			{
-				/*テーブルの温度とドリンクの色が一致*/
-				int temp = getTemp();
-				if ((temp >= HOT_VALUE && isBlack()) || (temp < HOT_VALUE && !isBlack()))
-				{
-					Report("The temperature of the table corresponds with the color of the drink.");
-					phase = PUTTING;
-				}
-				/*テーブルの温度とドリンクの色が一致しない*/
-				else
-				{
-					Report("The temperature of the table DOESN'T correspond with the color of the drink.");
-					phase = SEARCHING;
-				}
-				break;
-			}
-
-			/*テーブルにドリンクを置くフェーズ*/
-			case PUTTING:
-			{
-				armDown(); // アームを下ろす
-				delay(1000);
-				armOpen(); // アームを開く
-				delay(1000);
-				goStraight(-255); // 後退する
-				delay(1000);
-
-				Report("I put the drink on the table.");
-
-				achievement_flag++; // 達成フラグを1増やす
-				/*2つのドリンクを正しくテーブルに乗せた*/
-				if (achievement_flag >= 2)
-				{
-					Report("I have accomplished all the missions.");
-					phase = SUCCESS;
-				}
-				else
-				{
-					Report("I'll find the other drink.");
-					phase = FINDING;
-				}
-				break;
-			}
-
-			/*成功後のフェーズ*/
-			case SUCCESS:
-				Success();
-				break;
+		/*成功後のフェーズ*/
+		case SUCCESS:
+			Success();
+			break;
 		}
 	}
 	/*遠隔操縦*/
