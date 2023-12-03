@@ -1,4 +1,6 @@
-// TODO: 機体角度を取得できるようにしたい
+#include <math.h>
+
+// TODO: ロータリーエンコーダ→デッドレコニング
 
 /*動作モード*/
 enum Mode
@@ -41,6 +43,10 @@ const int HOT_VALUE = 40; // テーブルがHOTと判断する基準値[℃]
 /*アーム関連パラメータ*/
 const int CARRYING_DISTANCE = 50; // ドリンクを運ぶ際に近づく距離[mm]
 
+/*タイヤ関連パラメータ*/
+const int l = 10; //シャフト長[cm]
+const int d = 3; //タイヤ直径[cm]
+
 /**********ピン番号***********/
 /*超音波センサ*/
 const int ECHO = 2;
@@ -62,6 +68,10 @@ int black_counter = 0;	  // 黒線検知回数
 int achievement_flag = 0; // テーブル達成状況
 bool arm_is_open = true;  // アームが開いているかどうか
 bool arm_is_down = true;  // アームが下がっているかどうか
+double x_pos, y_pos = 0, 0; //初期座標
+double theta = M_PI / 2; //初期θ[deg]
+double r_L, r_R = 0, 0; //初期回転量
+int sequentially = 0; //r_L=r_Rとの連続回数
 
 void setup()
 {
@@ -120,17 +130,17 @@ void loop()
 				}
 				break;
 			}
-	
+
 			/*他のドリンクを探すフェーズ*/
 			case FINDING:
 			{
 				findDrink(); // ドリンクを探す
-	
+
 				Report("I found another drink.");
 				phase = APPROACHING;
 				break;
 			}
-	
+
 			/*検出したドリンクまで向かうフェーズ*/
 			case APPROACHING:
 			{
@@ -151,7 +161,7 @@ void loop()
 				}
 				break;
 			}
-	
+
 			/*ドリンクを持ち上げるフェーズ*/
 			case LIFTING:
 			{
@@ -161,17 +171,17 @@ void loop()
 				phase = SEARCHING;
 				break;
 			}
-	
+
 			/*ドリンクを置くテーブルを探すフェーズ*/
 			case SEARCHING:
 			{
 				findTable(); // テーブルを探す
-	
+
 				Report("I found a table.");
 				phase = CARRYING;
 				break;
 			}
-	
+
 			/*テーブルまでドリンクを運ぶフェーズ*/
 			case CARRYING:
 			{
@@ -192,7 +202,7 @@ void loop()
 				}
 				break;
 			}
-	
+
 			/*テーブルの温度を調べるフェーズ*/
 			case CHECKING:
 			{
@@ -211,7 +221,7 @@ void loop()
 				}
 				break;
 			}
-	
+
 			/*テーブルにドリンクを置くフェーズ*/
 			case PUTTING:
 			{
@@ -221,9 +231,9 @@ void loop()
 				delay(1000);
 				goStraight(-255); // 後退する
 				delay(1000);
-	
+
 				Report("I put the drink on the table.");
-	
+
 				achievement_flag++; // 達成フラグを1増やす
 				/*2つのドリンクを正しくテーブルに乗せた*/
 				if (achievement_flag >= 2)
@@ -238,16 +248,19 @@ void loop()
 				}
 				break;
 			}
-	
+
 			/*成功後のフェーズ*/
 			case SUCCESS:
+			{
 				Success();
 				break;
 			}
+		}
 	}
 	/*遠隔操縦*/
 	else if (mode == MANUAL)
 	{
+		//TODO: 要編集
 	}
 	/*テスト*/
 	else if (mode == TEST)
@@ -389,6 +402,27 @@ double getDistance(int trig, int echo)
 int getTemp()
 {
 	// TODO: 要編集
+}
+
+/*位置計算*/
+void calculatePosition()
+{
+	if (r_R == r_L)
+	{
+		return;
+	}
+	else
+	{
+		dtheta = (r_R - r_L) / (2 * (l/2));
+		rho = ((r_R + r_L) / (r_R - r_L)) * (l/2);
+		dl = 2 * rho * sin(dtheta / 2);
+		dx = dl * cos(dtheta / 2);
+		dy = dl * sin(dtheta / 2);
+		
+		x_pos = x_pos + dx * sin(dtheta) + dy * cos(dtheta);
+		y_pos = y_pos + dx * cos(dtheta) - dy * sin(dtheta);
+		theta = theta + dtheta;
+	}
 }
 
 /*成功後の動作*/
