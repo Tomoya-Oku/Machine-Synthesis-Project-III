@@ -1,4 +1,5 @@
 #include <math.h>
+#include <Servo.h>
 
 /*動作モード*/
 enum Mode
@@ -22,65 +23,93 @@ enum Phase
 	SUCCESS		 // すべてのミッション成功後に繰り返すフェーズ
 };
 
-/*初期値*/
+/*位置情報[x, y, angle]*/
+enum Position
+{
+	X,
+	Y,
+	Angle
+}
+
+/*左右タイヤ[0: LEFT, 1: RIGHT]*/
+enum LR
+{
+	LEFT,
+	RIGHT
+}
+
+/*モード・フェーズ初期値*/
 Mode mode = TEST;
 Phase phase = PUSHING;
 
-/*距離関連パラメータ*/
+/*超音波センサ関連パラメータ*/
 const int DISTANCE_COUNT = 1;  // 距離検知の基準回数（この回数だけ基準値を下回ったら停止）
 int AIR_TEMPERATURE = 20;	   // 初期化により変更される
 double SPEED_OF_SOUND = 343.5; // 気温20℃での値
+int distance_counter = 0;	   // 距離検知回数
 
-/*黒線関連パラメータ*/
-const int BLACK_VALUE = 500; // 黒線検知の輝度基準値
-const int BLACK_COUNT = 1;	 // 黒線検知の基準回数（この回数だけ基準値を下回ったら停止）
+/*フォトリフレクタ関連パラメータ*/
+const int BLACK_LINE = 500; // 黒線検知の輝度基準値
+const int BLACK_COUNT = 1;	// 黒線検知の基準回数（この回数だけ基準値を下回ったら停止）
+const int BLACK_CUP = 500;	// 黒いドリンクの輝度基準値
+int black_counter = 0;		// 黒線検知回数
 
 /*温度関連パラメータ*/
-const int HOT_VALUE = 40; // テーブルがHOTと判断する基準値[℃]
-const float B = 3950.0;	  // サーミスタのB定数
-const float R0 = 10000.0; // サーミスタの25度での抵抗値（カタログ値）
-const float Rd = 10000.0; // 検知抵抗の抵抗値
-const float Tk = 273.15;  // 0度=273.15ケルビン
+const int HOT_VALUE = 40;						 // テーブルがHOTと判断する基準値[℃]
+const float B = 3950.0;							 // サーミスタのB定数
+const float R0 = 10000.0;						 // サーミスタの25度での抵抗値（カタログ値）
+const float RD = 10000.0;						 // 検知抵抗の抵抗値
+const float TK = 273.15;						 // 0度=273.15ケルビン
+const int CHECKING_TEMPERATURE_TIME = 10 * 1000; // 温度を調べる時間[ms]
 
 /*アーム関連パラメータ*/
 const int CARRYING_DISTANCE = 50; // ドリンクを運ぶ際に近づく距離[mm]
+bool arm_is_open = true;		  // アームが開いているかどうか
+bool arm_is_down = true;		  // アームが下がっているかどうか
 
 /*タイヤ関連パラメータ*/
-const int l = 10; // シャフト長[cm]
-const int d = 3;  // タイヤ直径[cm]
+const int SHAFT_LENGTH = 10;	// シャフト長[cm]
+const int TIRE_DIAMETER = 3;	// タイヤ直径[cm]
+const int CORRECTION_SPEED = 1; // 直進補正をする際の重み
+int speed[2] = {255, 255}
+
+/*ロータリーエンコーダ関連*/
+const int threshold_ON = 600;
+const int threshold_OFF = 450;
+/*回転量*/
+double rotation_amount[2] = {0, 0};
+/*現在の座標[x, y, angle]*/
+double position[3] = {0, 0, M_PI / 2}; // 角度は左曲がりで+
+/*1ループ前の座標*/
+double before_position[3] = {0, 0, M_PI / 2}
 
 /**********ピン番号***********/
 /*LED*/
-const int LEDR = 4;
+const int LED = 4;
 /*超音波センサ*/
 const int ECHO = 2;
 const int TRIG = 3;
-/*モータドライバ(A: 左タイヤ，B: 右タイヤ)*/
+/*モータドライバ左*/
 const int AIN1 = 7;
 const int AIN2 = 8;
+const int PWMA = 9;
+/*モータドライバ左*/
 const int BIN1 = 11;
 const int BIN2 = 13;
-const int PWMA = 9;
 const int PWMB = 10;
 /*フォトリフレクタ*/
-const int PHRB = A0; // 黒線検知用
-const int PHRD = A1; // ドリンク色検知用
+const int PHOTO_REF = A0; // 黒線検知用
 /*サーミスタ*/
-const int THRM = A2;
-/*ロータリーエンコーダ*/
-const int PHASE_A = A3;
-const int PHASE_B = A4;
+const int THERMISTOR = A1;
+/*ロータリーエンコーダ左タイヤ*/
+const int L_PHASE_A = A2;
+const int L_PHASE_B = A3;
+/*ロータリーエンコーダ右タイヤ*/
+const int R_PHASE_A = A4;
+const int R_PHASE_B = A5;
 
 /**********グローバル変数***********/
-int distance_counter = 0;	// 距離検知回数
-int black_counter = 0;		// 黒線検知回数
-int achievement_flag = 0;	// テーブル達成状況
-bool arm_is_open = true;	// アームが開いているかどうか
-bool arm_is_down = true;	// アームが下がっているかどうか
-double x_pos, y_pos = 0, 0; // 初期座標
-double theta = M_PI / 2;	// 初期θ[deg]
-double r_L, r_R = 0, 0;		// 初期回転量
-int sequentially = 0;		// r_L=r_Rとの連続回数
+int achievement_flag = 0; // テーブル達成状況
 
 void setup()
 {
@@ -99,7 +128,7 @@ void setup()
 	pinMode(PWMB, OUTPUT);
 
 	/*LED*/
-	pinMode(LEDR, OUTPUT);
+	pinMode(LED, OUTPUT);
 
 	/*気温を取得し，音速を計算*/
 	AIR_TEMPERATURE = getTemp();
@@ -124,6 +153,11 @@ void loop()
 	/*自律制御*/
 	if (mode == AUTO)
 	{
+		/*現在の座標を記録*/
+		before_position = position;
+
+		calculatePosition(); // 位置情報を更新
+
 		switch (phase)
 		{
 		/*最初に2個のドリンクを押すフェーズ*/
@@ -132,13 +166,13 @@ void loop()
 			/*カウンターまでドリンクを入れたとき*/
 			if (isInCounter())
 			{
-				Report("I put two drinks on the counter.");
+				Report("COMPLETE PUSHING -> FINDING");
 				phase = FINDING;
 			}
 			else
 			{
 				// armOpen();
-				goStraight(255); // 直進
+				goStraight(); // 直進
 			}
 			break;
 		}
@@ -148,7 +182,7 @@ void loop()
 		{
 			findDrink(); // ドリンクを探す
 
-			Report("I found another drink.");
+			Report("COMPLETE FINDING -> APPROACHING");
 			phase = APPROACHING;
 			break;
 		}
@@ -162,14 +196,14 @@ void loop()
 				distance_counter++; // ノイズ対策
 				if (distance_counter >= DISTANCE_COUNT)
 				{
-					Report("I approached the drink.");
+					Report("COMPLETE APPROACHING -> LIFTING");
 					distance_counter = 0; // リセット
 					phase = LIFTING;
 				}
 			}
 			else
 			{
-				goStraight(255); // 直進
+				goStraight(); // 直進
 			}
 			break;
 		}
@@ -188,8 +222,7 @@ void loop()
 		case SEARCHING:
 		{
 			findTable(); // テーブルを探す
-
-			Report("I found a table.");
+			Report("COMPLETE SEARCING -> CARRYING");
 			phase = CARRYING;
 			break;
 		}
@@ -203,14 +236,14 @@ void loop()
 				distance_counter++; // ノイズ対策
 				if (distance_counter >= DISTANCE_COUNT)
 				{
-					Report("I carried the drink.");
+					Report("COMPLETE CARRYING -> CHECKING");
 					distance_counter = 0; // リセット
 					phase = CHECKING;
 				}
 			}
 			else
 			{
-				goStraight(255); // 直進
+				goStraight(); // 直進
 			}
 			break;
 		}
@@ -218,17 +251,29 @@ void loop()
 		/*テーブルの温度を調べるフェーズ*/
 		case CHECKING:
 		{
-			/*テーブルの温度とドリンクの色が一致*/
+			delay(CHECKING_TEMPERATURE_TIME);
 			int temp = getTemp();
+
+			/*テーブルの温度がHOTであればLEDをオンに*/
+			if (temp >= HOT_VALUE)
+			{
+				LED_ON();
+			}
+			else
+			{
+				LED_OFF();
+			}
+
+			/*テーブルの温度とドリンクの色が一致*/
 			if ((temp >= HOT_VALUE && isBlack()) || (temp < HOT_VALUE && !isBlack()))
 			{
-				Report("The temperature of the table corresponds with the color of the drink.");
+				Report("TEMPERATURE IS CORRECT");
 				phase = PUTTING;
 			}
 			/*テーブルの温度とドリンクの色が一致しない*/
 			else
 			{
-				Report("The temperature of the table DOESN'T correspond with the color of the drink.");
+				Report("TEMPERATURE IS WRONG");
 				phase = SEARCHING;
 			}
 			break;
@@ -238,24 +283,21 @@ void loop()
 		case PUTTING:
 		{
 			armDown(); // アームを下ろす
-			delay(1000);
 			armOpen(); // アームを開く
-			delay(1000);
-			goStraight(-255); // 後退する
-			delay(1000);
+			goBack();  // 後退する
 
-			Report("I put the drink on the table.");
+			Report("COMPLETE PUTTING");
 
 			achievement_flag++; // 達成フラグを1増やす
 			/*2つのドリンクを正しくテーブルに乗せた*/
 			if (achievement_flag >= 2)
 			{
-				Report("I have accomplished all the missions.");
+				Report("COMPLETE MISSION");
 				phase = SUCCESS;
 			}
 			else
 			{
-				Report("I'll find the other drink.");
+				Report("-> FINDING");
 				phase = FINDING;
 			}
 			break;
@@ -335,7 +377,15 @@ void LED_OFF()
 /*カウンター内に入ったかどうか*/
 bool isInCounter()
 {
-	// TODO: 要編集
+	/*黒線を検知*/
+	if (getPHRBValue() <= BLACK_VALUE)
+	{
+		return true;
+	}
+	else
+	{
+		return false;
+	}
 }
 
 /*ドリンクを探す→探し終えたら終了*/
@@ -353,6 +403,9 @@ void findTable()
 /*両タイヤを与えられたスピード（-255~255）に設定*/
 void setSpeed(int L_speed, int R_speed)
 {
+	speed[LEFT] = L_speed;
+	speed[RIGHT] = R_speed;
+
 	if (L_speed >= 0)
 	{
 		digitalWrite(AIN1, HIGH);
@@ -380,13 +433,53 @@ void setSpeed(int L_speed, int R_speed)
 	}
 }
 
-/*与えられたスピード（-255~255）で直進*/
-void goStraight(int speed)
+/*補正しつつ直進*/
+void goStraight(int back)
 {
-	setSpeed(speed, speed);
+	/*左に曲がっている*/
+	if (position[Angle] > before_position[Angle])
+	{
+		speed[RIGHT] = speed[RIGHT] - CORRECTION_SPEED;
+	}
+	/*右に曲がっている*/
+	else if (position[Angle] < before_position[Angle])
+	{
+		speed[LEFT] = speed[LEFT] - CORRECTION_SPEED;
+	}
+	/*曲がっていない*/
+	else
+	{
+		speed[LEFT] = 255;
+		speed[RIGHT] = 255;
+	}
+
+	setSpeed(speed[LEFT], speed[RIGHT]);
 }
 
-/*与えられた角度（-180[deg]~180[deg]に回転*/
+/*補正しつつ後退*/
+void goBack()
+{
+	/*左に曲がっている*/
+	if (positon[Angle] > before_position[Angle])
+	{
+		speed[RIGHT] = speed[RIGHT] + CORRECTION_SPEED;
+	}
+	/*右に曲がっている*/
+	else if (positon[Angle] < before_position[Angle])
+	{
+		speed[LEFT] = speed[LEFT] + CORRECTION_SPEED;
+	}
+	/*曲がっていない*/
+	else
+	{
+		speed[LEFT] = -255;
+		speed[RIGHT] = -255;
+	}
+
+	setSpeed(speed[LEFT], speed[RIGHT]);
+}
+
+/*与えられた角度（-180[deg]~180[deg]に回転）*/
 void rotate(int angle)
 {
 	// TODO: 要編集
@@ -395,19 +488,22 @@ void rotate(int angle)
 /*ドリンクの色を判定*/
 bool isBlack()
 {
-	// TODO: 要議論（いつ判定するか）・要編集
+	/*ドリンクが黒*/
+	if (getPHRFValue() <= BLACK_CUP)
+	{
+		return true;
+	}
+	/*ドリンクが白*/
+	else
+	{
+		return false;
+	}
 }
 
-/*フォトリフレクタで床の輝度を取得*/
-int getPHRBValue()
+/*フォトリフレクタで輝度を取得*/
+int getPHRFValue()
 {
-	return analogRead(PHRB);
-}
-
-/*フォトリフレクタでドリンクの輝度を取得*/
-int getPHRDValue()
-{
-	return analogRead(PHRD);
+	return analogRead(PHRF);
 }
 
 /*超音波センサで壁までの距離[mm]を計算*/
@@ -431,36 +527,128 @@ double getDistance(int trig, int echo)
 /*温度[℃]を取得*/
 int getTemp()
 {
-	float readValue = analogRead(analogPin);
-	float Rt = Rd * readValue / (1023 - readValue);
-	float Tbar = 1 / B * log(Rt / R0) + 1 / (Tk + 25);
+	float thrm = analogRead(THRM);
+	float Rt = RD * thrm / (1023 - thrm);
+	float Tbar = 1 / B * log(Rt / R0) + 1 / (TK + 25);
 	float T = 1 / Tbar;
-	float Tdeg = T - Tk;
+	float Tdeg = T - TK;
 
 	return Tdeg;
+}
+
+/*タイヤの回転量を取得*/
+void getRotation()
+{
+	int valA[2] = {0, 0};
+	valA[LEFT] = analogRead(L_PHASE_A);
+	valA[RIGHT] = analogRead(R_PHASE_A);
+
+	int valB[2] = {0, 0};
+	valB[LEFT] = analogRead(L_PHASE_B);
+	valB[RIGHT] = analogRead(R_PHASE_B);
+
+	int stateA[2] = {0, 0};
+	int stateB[2] = {0, 0};
+	int edgeA[2] = {0, 0};
+	int edgeB[2] = {0, 0};
+
+	/*左右*/
+	for (int i = 0; i <= 1; i++)
+	{
+		/* edge detection */
+		if ((valA[i] > threshold_ON) && (stateA[i] == 0))
+		{
+			stateA[i] = 1;
+			edgeA[i] = 1; // rising edge
+		}
+		if ((valA[i] < threshold_OFF) && (stateA[i] == 1))
+		{
+			stateA[i] = 0;
+			edgeA[i] = -1; // falling edge
+		}
+		if ((valB[i] > threshold_ON) && (stateB[i] == 0))
+		{
+			stateB[i] = 1;
+			edgeB[i] = 1; // rising edge
+		}
+		if ((valB[i] < threshold_OFF) && (stateB[i] == 1))
+		{
+			stateB[i] = 0;
+			edgeB[i] = -1; // falling edge
+
+			/* pulse & direction count */
+			if (edgeA[i] == 1)
+			{ // A rising
+				if (stateB[i])
+				{
+					rotation_amount[i]--;
+				}
+				else
+				{
+					rotation_amount[i]++;
+				}
+			}
+			if (edgeA[i] == -1)
+			{ // A falling
+				if (stateB[i])
+				{
+					rotation_amount[i]++;
+				}
+				else
+				{
+					rotation_amount[i]--;
+				}
+			}
+			if (edgeB[i] == 1)
+			{ // B rising
+				if (stateA[i])
+				{
+					rotation_amount[i]++;
+				}
+				else
+				{
+					rotation_amount[i]--;
+				}
+			}
+			if (edgeB[i] == -1)
+			{ // B falling
+				if (stateA[i])
+				{
+					rotation_amount[i]--;
+				}
+				else
+				{
+					rotation_amount[i]++;
+				}
+			}
+		}
+	}
 }
 
 /*位置計算*/
 void calculatePosition()
 {
-	if (r_R != r_L)
+	if (rotation_amount[LEFT] != rotation_amount[RIGHT])
 	{
-		dtheta = (r_R - r_L) / (2 * (l / 2));
-		rho = ((r_R + r_L) / (r_R - r_L)) * (l / 2);
+		dtheta = (rotation_amount[RIGHT] - rotation_amount[LEFT]) / (2 * (SHAFT_LENGTH / 2));
+		rho = ((rotation_amount[RIGHT] + rotation_amount[LEFT]) / (rotation_amount[RIGHT] - rotation_amount[LEFT])) * (SHAFT_LENGTH / 2);
 		dl = 2 * rho * sin(dtheta / 2);
 		dx = dl * cos(dtheta / 2);
 		dy = dl * sin(dtheta / 2);
 
-		x_pos = x_pos + dx * sin(dtheta) + dy * cos(dtheta);
-		y_pos = y_pos + dx * cos(dtheta) - dy * sin(dtheta);
-		theta = theta + dtheta;
+		position[X] = position[X] + dx * sin(dtheta) + dy * cos(dtheta);
+		position[Y] = position[Y] + dx * cos(dtheta) - dy * sin(dtheta);
+		position[Angle] = position[Angle] + dtheta;
 	}
 }
 
 /*成功後の動作*/
 void Success()
 {
-	// TODO: 要編集
+	digitalWrite(LEDR, HIGH);
+	delay(200);
+	digitalWrite(LEDR, LOW);
+	delay(200);
 }
 
 /*シリアルモニタにて状況報告*/
