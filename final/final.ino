@@ -1,7 +1,5 @@
 #include <math.h>
 
-// TODO: ロータリーエンコーダ→デッドレコニング
-
 /*動作モード*/
 enum Mode
 {
@@ -39,15 +37,21 @@ const int BLACK_COUNT = 1;	 // 黒線検知の基準回数（この回数だけ�
 
 /*温度関連パラメータ*/
 const int HOT_VALUE = 40; // テーブルがHOTと判断する基準値[℃]
+const float B = 3950.0;	  // サーミスタのB定数
+const float R0 = 10000.0; // サーミスタの25度での抵抗値（カタログ値）
+const float Rd = 10000.0; // 検知抵抗の抵抗値
+const float Tk = 273.15;  // 0度=273.15ケルビン
 
 /*アーム関連パラメータ*/
 const int CARRYING_DISTANCE = 50; // ドリンクを運ぶ際に近づく距離[mm]
 
 /*タイヤ関連パラメータ*/
-const int l = 10; //シャフト長[cm]
-const int d = 3; //タイヤ直径[cm]
+const int l = 10; // シャフト長[cm]
+const int d = 3;  // タイヤ直径[cm]
 
 /**********ピン番号***********/
+/*LED*/
+const int LEDR = 4;
 /*超音波センサ*/
 const int ECHO = 2;
 const int TRIG = 3;
@@ -61,21 +65,26 @@ const int PWMB = 10;
 /*フォトリフレクタ*/
 const int PHRB = A0; // 黒線検知用
 const int PHRD = A1; // ドリンク色検知用
+/*サーミスタ*/
+const int THRM = A2;
+/*ロータリーエンコーダ*/
+const int PHASE_A = A3;
+const int PHASE_B = A4;
 
 /**********グローバル変数***********/
-int distance_counter = 0; // 距離検知回数
-int black_counter = 0;	  // 黒線検知回数
-int achievement_flag = 0; // テーブル達成状況
-bool arm_is_open = true;  // アームが開いているかどうか
-bool arm_is_down = true;  // アームが下がっているかどうか
-double x_pos, y_pos = 0, 0; //初期座標
-double theta = M_PI / 2; //初期θ[deg]
-double r_L, r_R = 0, 0; //初期回転量
-int sequentially = 0; //r_L=r_Rとの連続回数
+int distance_counter = 0;	// 距離検知回数
+int black_counter = 0;		// 黒線検知回数
+int achievement_flag = 0;	// テーブル達成状況
+bool arm_is_open = true;	// アームが開いているかどうか
+bool arm_is_down = true;	// アームが下がっているかどうか
+double x_pos, y_pos = 0, 0; // 初期座標
+double theta = M_PI / 2;	// 初期θ[deg]
+double r_L, r_R = 0, 0;		// 初期回転量
+int sequentially = 0;		// r_L=r_Rとの連続回数
 
 void setup()
 {
-	Serial.begin(57600);
+	Serial.begin(115200);
 
 	/*超音波センサ*/
 	pinMode(ECHO, INPUT);
@@ -88,6 +97,9 @@ void setup()
 	pinMode(BIN2, OUTPUT);
 	pinMode(PWMA, OUTPUT);
 	pinMode(PWMB, OUTPUT);
+
+	/*LED*/
+	pinMode(LEDR, OUTPUT);
 
 	/*気温を取得し，音速を計算*/
 	AIR_TEMPERATURE = getTemp();
@@ -114,153 +126,153 @@ void loop()
 	{
 		switch (phase)
 		{
-			/*最初に2個のドリンクを押すフェーズ*/
-			case PUSHING:
+		/*最初に2個のドリンクを押すフェーズ*/
+		case PUSHING:
+		{
+			/*カウンターまでドリンクを入れたとき*/
+			if (isInCounter())
 			{
-				/*カウンターまでドリンクを入れたとき*/
-				if (isInCounter())
-				{
-					Report("I put two drinks on the counter.");
-					phase = FINDING;
-				}
-				else
-				{
-					// armOpen();
-					goStraight(255); // 直進
-				}
-				break;
+				Report("I put two drinks on the counter.");
+				phase = FINDING;
 			}
-
-			/*他のドリンクを探すフェーズ*/
-			case FINDING:
+			else
 			{
-				findDrink(); // ドリンクを探す
-
-				Report("I found another drink.");
-				phase = APPROACHING;
-				break;
+				// armOpen();
+				goStraight(255); // 直進
 			}
+			break;
+		}
 
-			/*検出したドリンクまで向かうフェーズ*/
-			case APPROACHING:
+		/*他のドリンクを探すフェーズ*/
+		case FINDING:
+		{
+			findDrink(); // ドリンクを探す
+
+			Report("I found another drink.");
+			phase = APPROACHING;
+			break;
+		}
+
+		/*検出したドリンクまで向かうフェーズ*/
+		case APPROACHING:
+		{
+			/*適当な距離までドリンクに近づく*/
+			if (getDistance(TRIG, ECHO) <= CARRYING_DISTANCE)
 			{
-				/*適当な距離までドリンクに近づく*/
-				if (getDistance(TRIG, ECHO) <= CARRYING_DISTANCE)
+				distance_counter++; // ノイズ対策
+				if (distance_counter >= DISTANCE_COUNT)
 				{
-					distance_counter++; // ノイズ対策
-					if (distance_counter >= DISTANCE_COUNT)
-					{
-						Report("I approached the drink.");
-						distance_counter = 0; // リセット
-						phase = LIFTING;
-					}
+					Report("I approached the drink.");
+					distance_counter = 0; // リセット
+					phase = LIFTING;
 				}
-				else
-				{
-					goStraight(255); // 直進
-				}
-				break;
 			}
-
-			/*ドリンクを持ち上げるフェーズ*/
-			case LIFTING:
+			else
 			{
-				armClose(); // アームを閉じる
-				delay(1000);
-				armUp(); // アームを上げる
+				goStraight(255); // 直進
+			}
+			break;
+		}
+
+		/*ドリンクを持ち上げるフェーズ*/
+		case LIFTING:
+		{
+			armClose(); // アームを閉じる
+			delay(1000);
+			armUp(); // アームを上げる
+			phase = SEARCHING;
+			break;
+		}
+
+		/*ドリンクを置くテーブルを探すフェーズ*/
+		case SEARCHING:
+		{
+			findTable(); // テーブルを探す
+
+			Report("I found a table.");
+			phase = CARRYING;
+			break;
+		}
+
+		/*テーブルまでドリンクを運ぶフェーズ*/
+		case CARRYING:
+		{
+			/*適当な距離までテーブルに近づく*/
+			if (getDistance(TRIG, ECHO) <= CARRYING_DISTANCE)
+			{
+				distance_counter++; // ノイズ対策
+				if (distance_counter >= DISTANCE_COUNT)
+				{
+					Report("I carried the drink.");
+					distance_counter = 0; // リセット
+					phase = CHECKING;
+				}
+			}
+			else
+			{
+				goStraight(255); // 直進
+			}
+			break;
+		}
+
+		/*テーブルの温度を調べるフェーズ*/
+		case CHECKING:
+		{
+			/*テーブルの温度とドリンクの色が一致*/
+			int temp = getTemp();
+			if ((temp >= HOT_VALUE && isBlack()) || (temp < HOT_VALUE && !isBlack()))
+			{
+				Report("The temperature of the table corresponds with the color of the drink.");
+				phase = PUTTING;
+			}
+			/*テーブルの温度とドリンクの色が一致しない*/
+			else
+			{
+				Report("The temperature of the table DOESN'T correspond with the color of the drink.");
 				phase = SEARCHING;
-				break;
 			}
+			break;
+		}
 
-			/*ドリンクを置くテーブルを探すフェーズ*/
-			case SEARCHING:
+		/*テーブルにドリンクを置くフェーズ*/
+		case PUTTING:
+		{
+			armDown(); // アームを下ろす
+			delay(1000);
+			armOpen(); // アームを開く
+			delay(1000);
+			goStraight(-255); // 後退する
+			delay(1000);
+
+			Report("I put the drink on the table.");
+
+			achievement_flag++; // 達成フラグを1増やす
+			/*2つのドリンクを正しくテーブルに乗せた*/
+			if (achievement_flag >= 2)
 			{
-				findTable(); // テーブルを探す
-
-				Report("I found a table.");
-				phase = CARRYING;
-				break;
+				Report("I have accomplished all the missions.");
+				phase = SUCCESS;
 			}
-
-			/*テーブルまでドリンクを運ぶフェーズ*/
-			case CARRYING:
+			else
 			{
-				/*適当な距離までテーブルに近づく*/
-				if (getDistance(TRIG, ECHO) <= CARRYING_DISTANCE)
-				{
-					distance_counter++; // ノイズ対策
-					if (distance_counter >= DISTANCE_COUNT)
-					{
-						Report("I carried the drink.");
-						distance_counter = 0; // リセット
-						phase = CHECKING;
-					}
-				}
-				else
-				{
-					goStraight(255); // 直進
-				}
-				break;
+				Report("I'll find the other drink.");
+				phase = FINDING;
 			}
+			break;
+		}
 
-			/*テーブルの温度を調べるフェーズ*/
-			case CHECKING:
-			{
-				/*テーブルの温度とドリンクの色が一致*/
-				int temp = getTemp();
-				if ((temp >= HOT_VALUE && isBlack()) || (temp < HOT_VALUE && !isBlack()))
-				{
-					Report("The temperature of the table corresponds with the color of the drink.");
-					phase = PUTTING;
-				}
-				/*テーブルの温度とドリンクの色が一致しない*/
-				else
-				{
-					Report("The temperature of the table DOESN'T correspond with the color of the drink.");
-					phase = SEARCHING;
-				}
-				break;
-			}
-
-			/*テーブルにドリンクを置くフェーズ*/
-			case PUTTING:
-			{
-				armDown(); // アームを下ろす
-				delay(1000);
-				armOpen(); // アームを開く
-				delay(1000);
-				goStraight(-255); // 後退する
-				delay(1000);
-
-				Report("I put the drink on the table.");
-
-				achievement_flag++; // 達成フラグを1増やす
-				/*2つのドリンクを正しくテーブルに乗せた*/
-				if (achievement_flag >= 2)
-				{
-					Report("I have accomplished all the missions.");
-					phase = SUCCESS;
-				}
-				else
-				{
-					Report("I'll find the other drink.");
-					phase = FINDING;
-				}
-				break;
-			}
-
-			/*成功後のフェーズ*/
-			case SUCCESS:
-			{
-				Success();
-				break;
-			}
+		/*成功後のフェーズ*/
+		case SUCCESS:
+		{
+			Success();
+			break;
+		}
 		}
 	}
 	/*遠隔操縦*/
 	else if (mode == MANUAL)
 	{
-		//TODO: 要編集
+		// TODO: 要編集
 	}
 	/*テスト*/
 	else if (mode == TEST)
@@ -306,6 +318,18 @@ void armDown()
 	{
 		// TODO: 要編集
 	}
+}
+
+/*LEDをON*/
+void LED_ON()
+{
+	digitalWrite(LEDR, HIGH);
+}
+
+/*LEDをOFF*/
+void LED_OFF()
+{
+	digitalWrite(LEDR, LOW);
 }
 
 /*カウンター内に入ったかどうか*/
@@ -374,10 +398,16 @@ bool isBlack()
 	// TODO: 要議論（いつ判定するか）・要編集
 }
 
-/*フォトリフレクタの輝度を取得*/
-int getBrightness()
+/*フォトリフレクタで床の輝度を取得*/
+int getPHRBValue()
 {
 	return analogRead(PHRB);
+}
+
+/*フォトリフレクタでドリンクの輝度を取得*/
+int getPHRDValue()
+{
+	return analogRead(PHRD);
 }
 
 /*超音波センサで壁までの距離[mm]を計算*/
@@ -401,24 +431,26 @@ double getDistance(int trig, int echo)
 /*温度[℃]を取得*/
 int getTemp()
 {
-	// TODO: 要編集
+	float readValue = analogRead(analogPin);
+	float Rt = Rd * readValue / (1023 - readValue);
+	float Tbar = 1 / B * log(Rt / R0) + 1 / (Tk + 25);
+	float T = 1 / Tbar;
+	float Tdeg = T - Tk;
+
+	return Tdeg;
 }
 
 /*位置計算*/
 void calculatePosition()
 {
-	if (r_R == r_L)
+	if (r_R != r_L)
 	{
-		return;
-	}
-	else
-	{
-		dtheta = (r_R - r_L) / (2 * (l/2));
-		rho = ((r_R + r_L) / (r_R - r_L)) * (l/2);
+		dtheta = (r_R - r_L) / (2 * (l / 2));
+		rho = ((r_R + r_L) / (r_R - r_L)) * (l / 2);
 		dl = 2 * rho * sin(dtheta / 2);
 		dx = dl * cos(dtheta / 2);
 		dy = dl * sin(dtheta / 2);
-		
+
 		x_pos = x_pos + dx * sin(dtheta) + dy * cos(dtheta);
 		y_pos = y_pos + dx * cos(dtheta) - dy * sin(dtheta);
 		theta = theta + dtheta;
@@ -428,7 +460,7 @@ void calculatePosition()
 /*成功後の動作*/
 void Success()
 {
-	// TODO: 要議論・要編集
+	// TODO: 要編集
 }
 
 /*シリアルモニタにて状況報告*/
