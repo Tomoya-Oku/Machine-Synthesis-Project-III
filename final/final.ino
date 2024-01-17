@@ -29,17 +29,17 @@ enum Position
 	X,
 	Y,
 	Angle
-}
+};
 
 /*左右タイヤ[0: LEFT, 1: RIGHT]*/
 enum LR
 {
 	LEFT,
 	RIGHT
-}
+};
 
 /*モード・フェーズ初期値*/
-Mode mode = TEST;
+Mode mode = MANUAL;
 Phase phase = PUSHING;
 
 /*超音波センサ関連パラメータ*/
@@ -48,22 +48,20 @@ int AIR_TEMPERATURE = 20;	   // 初期化により変更される
 double SPEED_OF_SOUND = 343.5; // 気温20℃での値
 int distance_counter = 0;	   // 距離検知回数
 
-/*フォトリフレクタ関連パラメータ*/
-const int BLACK_LINE = 500; // 黒線検知の輝度基準値
-const int BLACK_COUNT = 1;	// 黒線検知の基準回数（この回数だけ基準値を下回ったら停止）
-const int BLACK_CUP = 500;	// 黒いドリンクの輝度基準値
+/*黒線検知フォトリフレクタ関連パラメータ*/
+const int BLACK_LINE_VALUE = 500; // 黒線検知の輝度基準値
+const int BLACK_LINE_COUNT = 1;	// 黒線検知の基準回数（この回数だけ基準値を下回ったら停止）
 int black_counter = 0;		// 黒線検知回数
 
+/*色検知フォトリフレクタ関連パラメータ*/
+const int BLACK_CUP_VALUE = 500;	// 黒いドリンクの輝度基準値
+
 /*温度関連パラメータ*/
-const int HOT_VALUE = 40;						 // テーブルがHOTと判断する基準値[℃]
-const float B = 3950.0;							 // サーミスタのB定数
-const float R0 = 10000.0;						 // サーミスタの25度での抵抗値（カタログ値）
-const float RD = 10000.0;						 // 検知抵抗の抵抗値
-const float TK = 273.15;						 // 0度=273.15ケルビン
+const int HOT_TEMP = 35;						 // テーブルがHOTと判断する基準値[℃]
 const int CHECKING_TEMPERATURE_TIME = 10 * 1000; // 温度を調べる時間[ms]
 
 /*アーム関連パラメータ*/
-const int CARRYING_DISTANCE = 50; // ドリンクを運ぶ際に近づく距離[mm]
+const int DISTANCE_FOR_CARRYING = 50; // ドリンクを運ぶ際に近づく距離[mm]
 bool arm_is_open = true;		  // アームが開いているかどうか
 bool arm_is_down = true;		  // アームが下がっているかどうか
 
@@ -71,7 +69,7 @@ bool arm_is_down = true;		  // アームが下がっているかどうか
 const int SHAFT_LENGTH = 10;	// シャフト長[cm]
 const int TIRE_DIAMETER = 3;	// タイヤ直径[cm]
 const int CORRECTION_SPEED = 1; // 直進補正をする際の重み
-int speed[2] = {255, 255}
+int speed[2] = {255, 255};
 
 /*ロータリーエンコーダ関連*/
 const int threshold_ON = 600;
@@ -81,31 +79,42 @@ double rotation_amount[2] = {0, 0};
 /*現在の座標[x, y, angle]*/
 double position[3] = {0, 0, M_PI / 2}; // 角度は左曲がりで+
 /*1ループ前の座標*/
-double before_position[3] = {0, 0, M_PI / 2}
+double before_position[3] = {0, 0, M_PI / 2};
+
+/*サーボ関連*/
+Servo servo_for_arms;
+Servo servo_for_rack;
+const int OPEN_ARM_ANGLE = 0;
+const int CLOSE_ARM_ANGLE = 180;
+const int UP_RACK_ANGLE = 0;
+const int DOWN_RACK_ANGLE = 180;
 
 /**********ピン番号***********/
-/*LED*/
-const int LED = 4;
 /*超音波センサ*/
 const int ECHO = 2;
 const int TRIG = 3;
+/*LED*/
+const int LED = 4;
+/*サーボモーター*/
+const int SERVO_FOR_ARMS = 5;
+const int SERVO_FOR_RACK = 6;
 /*モータドライバ左*/
 const int AIN1 = 7;
 const int AIN2 = 8;
 const int PWMA = 9;
 /*モータドライバ左*/
-const int BIN1 = 11;
-const int BIN2 = 13;
-const int PWMB = 10;
+const int BIN1 = 10;
+const int BIN2 = 11;
+const int PWMB = 12;
 /*フォトリフレクタ*/
-const int PHOTO_REF_LINE = A0; // 黒線検知用
-const int PHOTO_REF_CUPC = A1; // カップの色
+const int PHOTO_REFLECTOR_FOR_BLACK_LINE = A0; // 黒線検知用
+const int PHOTO_REFLECTOR_FOR_CUP_COLOR = A1; // カップの色
 /*サーミスタ*/
 const int THERMISTOR = A2;
 /*ロータリーエンコーダ左タイヤ*/
-const int L_PHASE_A = A3;
+const int L_PHASE = A3;
 /*ロータリーエンコーダ右タイヤ*/
-const int R_PHASE_A = A4;
+const int R_PHASE = A4;
 
 /**********グローバル変数***********/
 int achievement_flag = 0; // テーブル達成状況
@@ -129,6 +138,10 @@ void setup()
 	/*LED*/
 	pinMode(LED, OUTPUT);
 
+	/*サーボ*/
+	servo_for_arms.attach(SERVO_FOR_ARMS);
+	servo_for_rack.attach(SERVO_FOR_RACK);
+
 	/*気温を取得し，音速を計算*/
 	AIR_TEMPERATURE = getTemp();
 	SPEED_OF_SOUND = 331.5 + 0.6 * AIR_TEMPERATURE;
@@ -141,19 +154,14 @@ void setup()
 
 void loop()
 {
-	/*シリアルモニタでコマンド受付*/
-	if (Serial.available())
-	{
-		String command = Serial.readStringUntil('\n'); // シリアルから文字列を受信
-		command.toLowerCase();						   // 入力された文字列を小文字に
-		Response(command);
-	}
-
 	/*自律制御*/
 	if (mode == AUTO)
 	{
 		/*現在の座標を記録*/
-		before_position = position;
+    for (int i = 0; i < 3; i++)
+    {
+        before_position[i] = position[i];
+    }
 
 		calculatePosition(); // 位置情報を更新
 
@@ -190,7 +198,7 @@ void loop()
 			case APPROACHING:
 			{
 				/*適当な距離までドリンクに近づく*/
-				if (getDistance(TRIG, ECHO) <= CARRYING_DISTANCE)
+				if (getDistance() <= DISTANCE_FOR_CARRYING)
 				{
 					distance_counter++; // ノイズ対策
 					if (distance_counter >= DISTANCE_COUNT)
@@ -230,7 +238,7 @@ void loop()
 			case CARRYING:
 			{
 				/*適当な距離までテーブルに近づく*/
-				if (getDistance(TRIG, ECHO) <= CARRYING_DISTANCE)
+				if (getDistance() <= DISTANCE_FOR_CARRYING)
 				{
 					distance_counter++; // ノイズ対策
 					if (distance_counter >= DISTANCE_COUNT)
@@ -254,7 +262,7 @@ void loop()
 				int temp = getTemp();
 
 				/*テーブルの温度がHOTであればLEDをオンに*/
-				if (temp >= HOT_VALUE)
+				if (temp >= HOT_TEMP)
 				{
 					LED_ON();
 				}
@@ -264,7 +272,7 @@ void loop()
 				}
 
 				/*テーブルの温度とドリンクの色が一致*/
-				if ((temp >= HOT_VALUE && isBlack()) || (temp < HOT_VALUE && !isBlack()))
+				if ((temp >= HOT_TEMP && DrinkIsBlack()) || (temp < HOT_TEMP && !DrinkIsBlack()))
 				{
 					Report("TEMPERATURE IS CORRECT");
 					phase = PUTTING;
@@ -313,7 +321,57 @@ void loop()
 	/*遠隔操縦*/
 	else if (mode == MANUAL)
 	{
-		// TODO: 要編集
+		char data = "";
+
+		/*シリアルモニタでコマンド受付*/
+		if (Serial.available() > 0)
+		{
+			data = Serial.read(); // シリアルから文字列を受信
+		}
+
+    int cmd = (int) data;
+
+		switch (cmd)
+		{
+      case 0:
+        setSpeed(0, 0);
+        break;
+      case 1:
+        armOpen();
+        Report("GOT COMMAND \"OPEN_ARMS\"");
+        break;
+      case 2:
+        armClose();
+        Report("GOT COMMAND \"CLOSE_ARMS\"");
+        break;
+      case 3:
+        armUp();
+        Report("GOT COMMAND \"UP_RACK\"");
+        break;
+      case 4:
+				armDown();
+        Report("GOT COMMAND \"DOWN_RACK\"");
+				break;
+			case 5:
+				setSpeed(255, 255);
+				Report("GOT COMMAND \"GO_FORWARD\"");
+				break;
+			case 6:
+				setSpeed(0, 255);
+				Report("GOT COMMAND \"GO_LEFT\"");
+				break;
+			case 7:
+				setSpeed(-255, -255);
+				Report("GOT COMMAND \"GO_BACK\"");
+				break;
+			case 8:
+				setSpeed(255, 0);
+				Report("GOT COMMAND \"GO_RIGHT\"");
+				break;
+			default:
+				break;
+		}
+
 	}
 	/*テスト*/
 	else if (mode == TEST)
@@ -327,7 +385,7 @@ void armOpen()
 	/*アームが開いていないとき*/
 	if (!arm_is_open)
 	{
-		// TODO: 要編集
+		servo_for_arms.write(OPEN_ARM_ANGLE);
 	}
 }
 
@@ -337,7 +395,7 @@ void armClose()
 	/*アームが開いているとき*/
 	if (arm_is_open)
 	{
-		// TODO: 要編集
+		servo_for_arms.write(CLOSE_ARM_ANGLE);
 	}
 }
 
@@ -347,7 +405,7 @@ void armUp()
 	/*アームが下がっているとき*/
 	if (arm_is_down)
 	{
-		// TODO: 要編集
+		servo_for_rack.write(UP_RACK_ANGLE);
 	}
 }
 
@@ -357,27 +415,27 @@ void armDown()
 	/*アームが上がっているとき*/
 	if (!arm_is_down)
 	{
-		// TODO: 要編集
+		servo_for_rack.write(DOWN_RACK_ANGLE);
 	}
 }
 
 /*LEDをON*/
 void LED_ON()
 {
-	digitalWrite(LEDR, HIGH);
+	digitalWrite(LED, HIGH);
 }
 
 /*LEDをOFF*/
 void LED_OFF()
 {
-	digitalWrite(LEDR, LOW);
+	digitalWrite(LED, LOW);
 }
 
 /*カウンター内に入ったかどうか*/
 bool isInCounter()
 {
 	/*黒線を検知*/
-	if (getPHRBValue() <= BLACK_VALUE)
+	if (getFloorColor() <= BLACK_LINE_VALUE)
 	{
 		return true;
 	}
@@ -433,7 +491,7 @@ void setSpeed(int L_speed, int R_speed)
 }
 
 /*補正しつつ直進*/
-void goStraight(int back)
+void goStraight()
 {
 	/*左に曲がっている*/
 	if (position[Angle] > before_position[Angle])
@@ -459,12 +517,12 @@ void goStraight(int back)
 void goBack()
 {
 	/*左に曲がっている*/
-	if (positon[Angle] > before_position[Angle])
+	if (position[Angle] > before_position[Angle])
 	{
 		speed[RIGHT] = speed[RIGHT] + CORRECTION_SPEED;
 	}
 	/*右に曲がっている*/
-	else if (positon[Angle] < before_position[Angle])
+	else if (position[Angle] < before_position[Angle])
 	{
 		speed[LEFT] = speed[LEFT] + CORRECTION_SPEED;
 	}
@@ -485,10 +543,10 @@ void rotate(int angle)
 }
 
 /*ドリンクの色を判定*/
-bool isBlack()
+bool DrinkIsBlack()
 {
 	/*ドリンクが黒*/
-	if (getPHRFValue() <= BLACK_CUP)
+	if (getDrinkColor() <= BLACK_CUP_VALUE)
 	{
 		return true;
 	}
@@ -500,20 +558,25 @@ bool isBlack()
 }
 
 /*フォトリフレクタで輝度を取得*/
-int getPHRFValue()
+int getDrinkColor()
 {
-	return analogRead(PHRF);
+	return analogRead(PHOTO_REFLECTOR_FOR_CUP_COLOR);
+}
+
+int getFloorColor()
+{
+	return analogRead(PHOTO_REFLECTOR_FOR_BLACK_LINE);
 }
 
 /*超音波センサで壁までの距離[mm]を計算*/
-double getDistance(int trig, int echo)
+double getDistance()
 {
-	digitalWrite(trig, LOW);
+	digitalWrite(TRIG, LOW);
 	delayMicroseconds(2);
-	digitalWrite(trig, HIGH);
+	digitalWrite(TRIG, HIGH);
 	delayMicroseconds(10);
-	digitalWrite(trig, LOW);
-	double duration = pulseIn(echo, HIGH); // 往復にかかった時間が返却される[ms]
+	digitalWrite(TRIG, LOW);
+	double duration = pulseIn(ECHO, HIGH); // 往復にかかった時間が返却される[ms]
 
 	if (duration > 0)
 	{
@@ -526,7 +589,12 @@ double getDistance(int trig, int echo)
 /*温度[℃]を取得*/
 int getTemp()
 {
-	float thrm = analogRead(THRM);
+	float B = 3950.0;							 // サーミスタのB定数
+	float R0 = 10000.0;						 // サーミスタの25度での抵抗値（カタログ値）
+	float RD = 10000.0;						 // 検知抵抗の抵抗値
+	float TK = 273.15;						 // 0度=273.15ケルビン
+
+	float thrm = analogRead(THERMISTOR);
 	float Rt = RD * thrm / (1023 - thrm);
 	float Tbar = 1 / B * log(Rt / R0) + 1 / (TK + 25);
 	float T = 1 / Tbar;
@@ -536,89 +604,52 @@ int getTemp()
 }
 
 /*タイヤの回転量を取得*/
+//TODO: 修正
 void getRotation()
 {
-	int valA[2] = {0, 0};
-	valA[LEFT] = analogRead(L_PHASE_A);
-	valA[RIGHT] = analogRead(R_PHASE_A);
+	int val[2] = {0, 0};
+	val[LEFT] = analogRead(L_PHASE);
+	val[RIGHT] = analogRead(R_PHASE);
 
-	int valB[2] = {0, 0};
-	valB[LEFT] = analogRead(L_PHASE_B);
-	valB[RIGHT] = analogRead(R_PHASE_B);
-
-	int stateA[2] = {0, 0};
-	int stateB[2] = {0, 0};
-	int edgeA[2] = {0, 0};
-	int edgeB[2] = {0, 0};
+	int state[2] = {0, 0};
+	int edge[2] = {0, 0};
 
 	/*左右*/
 	for (int i = 0; i <= 1; i++)
 	{
 		/* edge detection */
-		if ((valA[i] > threshold_ON) && (stateA[i] == 0))
+		if ((val[i] > threshold_ON) && (state[i] == 0))
 		{
-			stateA[i] = 1;
-			edgeA[i] = 1; // rising edge
+			state[i] = 1;
+			edge[i] = 1; // rising edge
 		}
-		if ((valA[i] < threshold_OFF) && (stateA[i] == 1))
+		if ((val[i] < threshold_OFF) && (state[i] == 1))
 		{
-			stateA[i] = 0;
-			edgeA[i] = -1; // falling edge
+			state[i] = 0;
+			edge[i] = -1; // falling edge
 		}
-		if ((valB[i] > threshold_ON) && (stateB[i] == 0))
-		{
-			stateB[i] = 1;
-			edgeB[i] = 1; // rising edge
-		}
-		if ((valB[i] < threshold_OFF) && (stateB[i] == 1))
-		{
-			stateB[i] = 0;
-			edgeB[i] = -1; // falling edge
 
-			/* pulse & direction count */
-			if (edgeA[i] == 1)
-			{ // A rising
-				if (stateB[i])
-				{
-					rotation_amount[i]--;
-				}
-				else
-				{
-					rotation_amount[i]++;
-				}
+		/* pulse & direction count */
+		if (edge[i] == 1)
+		{ // A rising
+			if (state[i])
+			{
+				rotation_amount[i]--;
 			}
-			if (edgeA[i] == -1)
-			{ // A falling
-				if (stateB[i])
-				{
-					rotation_amount[i]++;
-				}
-				else
-				{
-					rotation_amount[i]--;
-				}
+			else
+			{
+				rotation_amount[i]++;
 			}
-			if (edgeB[i] == 1)
-			{ // B rising
-				if (stateA[i])
-				{
-					rotation_amount[i]++;
-				}
-				else
-				{
-					rotation_amount[i]--;
-				}
+		}
+		if (edge[i] == -1)
+		{ // A falling
+			if (state[i])
+			{
+				rotation_amount[i]++;
 			}
-			if (edgeB[i] == -1)
-			{ // B falling
-				if (stateA[i])
-				{
-					rotation_amount[i]--;
-				}
-				else
-				{
-					rotation_amount[i]++;
-				}
+			else
+			{
+				rotation_amount[i]--;
 			}
 		}
 	}
@@ -629,11 +660,11 @@ void calculatePosition()
 {
 	if (rotation_amount[LEFT] != rotation_amount[RIGHT])
 	{
-		dtheta = (rotation_amount[RIGHT] - rotation_amount[LEFT]) / (2 * (SHAFT_LENGTH / 2));
-		rho = ((rotation_amount[RIGHT] + rotation_amount[LEFT]) / (rotation_amount[RIGHT] - rotation_amount[LEFT])) * (SHAFT_LENGTH / 2);
-		dl = 2 * rho * sin(dtheta / 2);
-		dx = dl * cos(dtheta / 2);
-		dy = dl * sin(dtheta / 2);
+		double dtheta = (rotation_amount[RIGHT] - rotation_amount[LEFT]) / (2 * (SHAFT_LENGTH / 2));
+		double rho = ((rotation_amount[RIGHT] + rotation_amount[LEFT]) / (rotation_amount[RIGHT] - rotation_amount[LEFT])) * (SHAFT_LENGTH / 2);
+		double dl = 2 * rho * sin(dtheta / 2);
+		double dx = dl * cos(dtheta / 2);
+		double dy = dl * sin(dtheta / 2);
 
 		position[X] = position[X] + dx * sin(dtheta) + dy * cos(dtheta);
 		position[Y] = position[Y] + dx * cos(dtheta) - dy * sin(dtheta);
@@ -644,9 +675,9 @@ void calculatePosition()
 /*成功後の動作*/
 void Success()
 {
-	digitalWrite(LEDR, HIGH);
+	digitalWrite(LED, HIGH);
 	delay(200);
-	digitalWrite(LEDR, LOW);
+	digitalWrite(LED, LOW);
 	delay(200);
 }
 
@@ -686,13 +717,8 @@ void Response(String command)
 	else if (command == "distance" || command == "dist")
 	{
 		Serial.print("\n[Distance] ");
-		Serial.print(getDistance(TRIG, ECHO));
+		Serial.print(getDistance());
 		Serial.print("[mm]");
-	}
-	else if (command == "brightness" || command == "brt")
-	{
-		Serial.print("\n[Brightness] ");
-		Serial.print(getBrightness());
 	}
 	else if (command == "temperature" || command == "temp")
 	{
