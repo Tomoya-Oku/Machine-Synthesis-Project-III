@@ -1,15 +1,18 @@
 import processing.serial.*;
 Serial myPort;
 
-//矢印キーの入力値
 int mode = 0;
+int temp = 0;
+
+PImage bulb;
 
 void setup()
 {
     size(1200, 600); //Windowサイズ指定
+    bulb = loadImage("bulb.png");
     
     print(Serial.list());
-    myPort = new Serial(this, "/dev/tty.usbmodem14101", 115200);
+    myPort = new Serial(this, "/dev/tty.usbmodem14201", 115200);
 }
 
 void draw()
@@ -23,40 +26,40 @@ void draw()
             mode = 1;
             
             fill(#FFFFFF);
-            textSize(50);
+            textSize(200);
             noStroke();
             textAlign(CENTER, CENTER);
-            text("ARM OPEN", 900, 300);
+            text("◀▶", 900, 300);
         }
         else if (key == 'P' || key == 'p')
         {
             mode = 2;
             
             fill(#FFFFFF);
-            textSize(50);  //文字の大きさ
+            textSize(200);  //文字の大きさ
             noStroke();
             textAlign(CENTER, CENTER);
-            text("ARM CLOSE", 900, 300);
+            text("▶◀", 900, 300);
         }
         else if (key == 'U' || key == 'u')
         {
             mode = 3;
             
             fill(#FFFFFF);
-            textSize(50);  //文字の大きさ
+            textSize(200);  //文字の大きさ
             noStroke();
             textAlign(CENTER, CENTER);
-            text("RACK UP", 900, 300);
+            text("▲", 900, 300);
         }
         else if (key == 'I' || key == 'i')
         {
             mode = 4;
             
             fill(#FFFFFF);
-            textSize(50);  //文字の大きさ
+            textSize(200);  //文字の大きさ
             noStroke();
             textAlign(CENTER, CENTER);
-            text("RACK DOWN", 900, 300);
+            text("▼", 900, 300);
         }
         
         else if (key == 'W' || key == 'w')
@@ -111,30 +114,47 @@ void draw()
             noStroke();  //枠線なし
             triangle(300, 200, 300, 400, 450, 300);  //三角形の頂点の座標
         }
+        else if (key == ' ')
+        {
+            mode = 9;
+            
+            image(bulb, 900, 300);
+        }
         else
         {
             mode = 0;
         }
     }
-      else
-      {
-          mode = 0;   //キーが押されていない時，0を返す
-      }
+    else
+    {
+        mode = 0;   //キーが押されていない時，0を返す
+    }
     
     fill(#FFFFFF);
-    textSize(20);  //文字の大きさ
+    textSize(50);  //文字の大きさ
     noStroke();
     textAlign(CENTER, CENTER);
-    text(mode, 600, 100);
+    text(temp, 600, 100);
+    text("°C", 650, 100);
+    textSize(20);  //文字の大きさ
     textAlign(LEFT, CENTER);
-    text("O: Open arms", 565, 180);
-    text("P: Close arms", 565, 200);
-    text("U: Up rack", 565, 220);
-    text("I: Down rack", 565, 240);
-    text("W: Forward", 565, 260);
-    text("A: Left", 565, 280);
-    text("S: Back", 565, 300);
-    text("D: Right", 565, 320);
+    text("O -> Open", 565, 180);
+    text("P -> Close", 565, 200);
+    text("U -> Up", 565, 220);
+    text("I -> Down", 565, 240);
+    text("W -> Forward", 565, 260);
+    text("A -> Left", 565, 280);
+    text("S -> Back", 565, 300);
+    text("D -> Right", 565, 320);
+    text("SPACE -> Light", 565, 340);
     
     myPort.write((char)mode); //Portに信号を伝える
+}
+
+void serialEvent(Serial port)
+{
+  if (port.available() > 0)
+  {
+    temp = port.read();
+  }
 }
