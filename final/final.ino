@@ -39,7 +39,7 @@ enum LR
 };
 
 /*モード・フェーズ初期値*/
-Mode mode = MANUAL;
+Mode mode = TEST;
 Phase phase = PUSHING;
 
 /*超音波センサ関連パラメータ*/
@@ -49,7 +49,7 @@ double SPEED_OF_SOUND = 343.5; // 気温20℃での値
 int distance_counter = 0;	   // 距離検知回数
 
 /*黒線検知フォトリフレクタ関連パラメータ*/
-const int BLACK_LINE_VALUE = 500; // 黒線検知の輝度基準値
+const int BLACK_LINE_VALUE = 600; // 黒線検知の輝度基準値
 const int BLACK_LINE_COUNT = 1;	// 黒線検知の基準回数（この回数だけ基準値を下回ったら停止）
 int black_counter = 0;		// 黒線検知回数
 
@@ -86,8 +86,8 @@ Servo servo_for_arms;
 Servo servo_for_rack;
 const int OPEN_ARM_ANGLE = 0;
 const int CLOSE_ARM_ANGLE = 180;
-const int UP_RACK_ANGLE = 0;
-const int DOWN_RACK_ANGLE = 180;
+const int UP_RACK_ANGLE = 180;
+const int DOWN_RACK_ANGLE = 0;
 
 /**********ピン番号***********/
 /*超音波センサ*/
@@ -146,14 +146,16 @@ void setup()
 	AIR_TEMPERATURE = getTemp();
 	SPEED_OF_SOUND = 331.5 + 0.6 * AIR_TEMPERATURE;
 
-	/*アームを開く*/
-	armOpen();
-
-	Report("Setup has finished.");
+  LED_ON();
+  delay(500);
+  LED_OFF();
 }
 
 void loop()
 {
+  int temp = getTemp();
+  Serial.write(temp);
+
 	/*自律制御*/
 	if (mode == AUTO)
 	{
@@ -173,7 +175,6 @@ void loop()
 				/*カウンターまでドリンクを入れたとき*/
 				if (isInCounter())
 				{
-					Report("COMPLETE PUSHING -> FINDING");
 					phase = FINDING;
 				}
 				else
@@ -188,8 +189,6 @@ void loop()
 			case FINDING:
 			{
 				findDrink(); // ドリンクを探す
-
-				Report("COMPLETE FINDING -> APPROACHING");
 				phase = APPROACHING;
 				break;
 			}
@@ -198,12 +197,11 @@ void loop()
 			case APPROACHING:
 			{
 				/*適当な距離までドリンクに近づく*/
-				if (getDistance() <= DISTANCE_FOR_CARRYING)
+				if (getDistance(temp) <= DISTANCE_FOR_CARRYING)
 				{
 					distance_counter++; // ノイズ対策
 					if (distance_counter >= DISTANCE_COUNT)
 					{
-						Report("COMPLETE APPROACHING -> LIFTING");
 						distance_counter = 0; // リセット
 						phase = LIFTING;
 					}
@@ -229,7 +227,6 @@ void loop()
 			case SEARCHING:
 			{
 				findTable(); // テーブルを探す
-				Report("COMPLETE SEARCING -> CARRYING");
 				phase = CARRYING;
 				break;
 			}
@@ -238,12 +235,11 @@ void loop()
 			case CARRYING:
 			{
 				/*適当な距離までテーブルに近づく*/
-				if (getDistance() <= DISTANCE_FOR_CARRYING)
+				if (getDistance(temp) <= DISTANCE_FOR_CARRYING)
 				{
 					distance_counter++; // ノイズ対策
 					if (distance_counter >= DISTANCE_COUNT)
 					{
-						Report("COMPLETE CARRYING -> CHECKING");
 						distance_counter = 0; // リセット
 						phase = CHECKING;
 					}
@@ -274,13 +270,11 @@ void loop()
 				/*テーブルの温度とドリンクの色が一致*/
 				if ((temp >= HOT_TEMP && DrinkIsBlack()) || (temp < HOT_TEMP && !DrinkIsBlack()))
 				{
-					Report("TEMPERATURE IS CORRECT");
 					phase = PUTTING;
 				}
 				/*テーブルの温度とドリンクの色が一致しない*/
 				else
 				{
-					Report("TEMPERATURE IS WRONG");
 					phase = SEARCHING;
 				}
 				break;
@@ -293,18 +287,14 @@ void loop()
 				armOpen(); // アームを開く
 				goBack();  // 後退する
 
-				Report("COMPLETE PUTTING");
-
 				achievement_flag++; // 達成フラグを1増やす
 				/*2つのドリンクを正しくテーブルに乗せた*/
 				if (achievement_flag >= 2)
 				{
-					Report("COMPLETE MISSION");
 					phase = SUCCESS;
 				}
 				else
 				{
-					Report("-> FINDING");
 					phase = FINDING;
 				}
 				break;
@@ -321,6 +311,9 @@ void loop()
 	/*遠隔操縦*/
 	else if (mode == MANUAL)
 	{
+    int temp = getTemp();
+    Serial.println(temp);
+
 		char data = "";
 
 		/*シリアルモニタでコマンド受付*/
@@ -335,88 +328,77 @@ void loop()
 		{
       case 0:
         setSpeed(0, 0);
+        LED_OFF();
         break;
       case 1:
         armOpen();
-        Report("GOT COMMAND \"OPEN_ARMS\"");
         break;
       case 2:
         armClose();
-        Report("GOT COMMAND \"CLOSE_ARMS\"");
         break;
       case 3:
         armUp();
-        Report("GOT COMMAND \"UP_RACK\"");
         break;
       case 4:
 				armDown();
-        Report("GOT COMMAND \"DOWN_RACK\"");
 				break;
 			case 5:
 				setSpeed(255, 255);
-				Report("GOT COMMAND \"GO_FORWARD\"");
 				break;
 			case 6:
-				setSpeed(0, 255);
-				Report("GOT COMMAND \"GO_LEFT\"");
+				setSpeed(-255, 255);
 				break;
 			case 7:
 				setSpeed(-255, -255);
-				Report("GOT COMMAND \"GO_BACK\"");
 				break;
 			case 8:
-				setSpeed(255, 0);
-				Report("GOT COMMAND \"GO_RIGHT\"");
+				setSpeed(255, -255);
 				break;
+      case 9:
+        LED_ON();
+        break;
+      case 10:
+        LED_ON();
+        break;
 			default:
 				break;
 		}
-
 	}
-	/*テスト*/
-	else if (mode == TEST)
-	{
-	}
+  else if (mode == TEST)
+  {
+    Serial.println("x: ");
+    Serial.print(position[X]);
+    Serial.println("\ty: ");
+    Serial.print(position[Y]);
+    Serial.println("\tangle: : ");
+    Serial.print(position[Angle]);
+    
+    goStraight();
+  }
 }
 
 /*アームを開く*/
 void armOpen()
 {
-	/*アームが開いていないとき*/
-	if (!arm_is_open)
-	{
-		servo_for_arms.write(OPEN_ARM_ANGLE);
-	}
+	servo_for_arms.write(OPEN_ARM_ANGLE);
 }
 
 /*アームを閉じる*/
 void armClose()
 {
-	/*アームが開いているとき*/
-	if (arm_is_open)
-	{
-		servo_for_arms.write(CLOSE_ARM_ANGLE);
-	}
+	servo_for_arms.write(CLOSE_ARM_ANGLE);
 }
 
 /*アームを上げる*/
 void armUp()
 {
-	/*アームが下がっているとき*/
-	if (arm_is_down)
-	{
-		servo_for_rack.write(UP_RACK_ANGLE);
-	}
+	servo_for_rack.write(UP_RACK_ANGLE);
 }
 
 /*アームを下げる*/
 void armDown()
 {
-	/*アームが上がっているとき*/
-	if (!arm_is_down)
-	{
-		servo_for_rack.write(DOWN_RACK_ANGLE);
-	}
+	servo_for_rack.write(DOWN_RACK_ANGLE);
 }
 
 /*LEDをON*/
@@ -435,7 +417,7 @@ void LED_OFF()
 bool isInCounter()
 {
 	/*黒線を検知*/
-	if (getFloorColor() <= BLACK_LINE_VALUE)
+	if (getFloorColor() > BLACK_LINE_VALUE)
 	{
 		return true;
 	}
@@ -546,7 +528,7 @@ void rotate(int angle)
 bool DrinkIsBlack()
 {
 	/*ドリンクが黒*/
-	if (getDrinkColor() <= BLACK_CUP_VALUE)
+	if (getDrinkColor() > BLACK_CUP_VALUE)
 	{
 		return true;
 	}
@@ -569,7 +551,7 @@ int getFloorColor()
 }
 
 /*超音波センサで壁までの距離[mm]を計算*/
-double getDistance()
+double getDistance(int temp)
 {
 	digitalWrite(TRIG, LOW);
 	delayMicroseconds(2);
@@ -581,7 +563,7 @@ double getDistance()
 	if (duration > 0)
 	{
 		duration = duration / 2; // 往路にかかった時間[ms]
-		double distance = duration * SPEED_OF_SOUND * 100 / 100000;
+		double distance = duration * getSpeedOfSound(temp) * 100 / 100000;
 		return distance;
 	}
 }
@@ -591,7 +573,7 @@ int getTemp()
 {
 	float B = 3950.0;							 // サーミスタのB定数
 	float R0 = 10000.0;						 // サーミスタの25度での抵抗値（カタログ値）
-	float RD = 10000.0;						 // 検知抵抗の抵抗値
+	float RD = 2000.0;						 // 検知抵抗の抵抗値
 	float TK = 273.15;						 // 0度=273.15ケルビン
 
 	float thrm = analogRead(THERMISTOR);
@@ -601,6 +583,11 @@ int getTemp()
 	float Tdeg = T - TK;
 
 	return Tdeg;
+}
+
+double getSpeedOfSound(int temp)
+{
+  return 331.5 + 0.6 * temp;  
 }
 
 /*タイヤの回転量を取得*/
@@ -679,79 +666,4 @@ void Success()
 	delay(200);
 	digitalWrite(LED, LOW);
 	delay(200);
-}
-
-/*シリアルモニタにて状況報告*/
-void Report(String message)
-{
-	Serial.print("\n[Report] ");
-	Serial.print(message);
-}
-
-/*シリアルモニタでコマンドに対して応答*/
-void Response(String command)
-{
-	if (command == "phase" || command == "ph")
-	{
-		Serial.print("\n[Phase] ");
-		Serial.print(phase);
-	}
-	else if (command == "mode")
-	{
-		Serial.print("\n[Mode] ");
-		Serial.print(mode);
-	}
-	else if (command == "mode_change auto" || command == "mc auto")
-	{
-		mode = AUTO;
-		phase = PUSHING;
-	}
-	else if (command == "mode_change manual" || command == "mc manual" || command == "mc man")
-	{
-		mode = MANUAL;
-	}
-	else if (command == "mode_change test" || command == "mc test")
-	{
-		mode = TEST;
-	}
-	else if (command == "distance" || command == "dist")
-	{
-		Serial.print("\n[Distance] ");
-		Serial.print(getDistance());
-		Serial.print("[mm]");
-	}
-	else if (command == "temperature" || command == "temp")
-	{
-		Serial.print("\n[Temperature] ");
-		Serial.print(getTemp());
-		Serial.print("[℃]");
-	}
-	else if (command == "distance_counter" || command == "dc")
-	{
-		Serial.print("\n[Distance Counter] ");
-		Serial.print(distance_counter);
-	}
-	else if (command == "black_line_counter" || command == "blc")
-	{
-		Serial.print("\n[Black Line Counter] ");
-		Serial.print(black_counter);
-	}
-	else if (command == "air_temperature" || command == "atemp")
-	{
-		Serial.print("\n[Air temperature] ");
-		Serial.print(AIR_TEMPERATURE);
-		Serial.print("[℃]");
-	}
-	else if (command == "speed of sound" || command == "ss")
-	{
-		Serial.print("\n[Speed of sound] ");
-		Serial.print(SPEED_OF_SOUND);
-		Serial.print("[m/s]]");
-	}
-	else
-	{
-		Serial.print("\nI don't know the meaning of \"");
-		Serial.print(command);
-		Serial.print("\"");
-	}
 }
