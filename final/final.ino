@@ -12,6 +12,7 @@ enum Mode
 /*自動制御におけるフェーズ*/
 enum Phase
 {
+ PREPARATION,
 	PUSHING,	 // カウンターに2つのドリンクを押し込むフェーズ
 	FINDING,	 // テーブルに置くドリンクを発見するフェーズ
 	APPROACHING, // 発見したドリンクに近づくフェーズ
@@ -70,6 +71,7 @@ const int SHAFT_LENGTH = 10;	// シャフト長[cm]
 const int TIRE_DIAMETER = 3;	// タイヤ直径[cm]
 const int CORRECTION_SPEED = 1; // 直進補正をする際の重み
 int speed[2] = {255, 255};
+const int TURN_TIME = 1500;
 
 /*ロータリーエンコーダ関連*/
 const int threshold_ON = 600;
@@ -167,25 +169,48 @@ void loop()
 
 		calculatePosition(); // 位置情報を更新
 
+  turnRight();
+		// armOpen();
+		goStraight(); // 直進
+  delay(1000);
+  turnLeft();
+
+  
+  while(isInCounter())
+  {
+    goStraight();
+  }
+
+  
+
+  /*
 		switch (phase)
 		{
-			/*最初に2個のドリンクを押すフェーズ*/
+   case PREPARATION:
+   {
+     turnRight();
+					// armOpen();
+					goStraight(); // 直進
+     delay(1000);
+     turnLeft();
+
+     phase = PUSHING;
+     break;
+   }
+
 			case PUSHING:
 			{
-				/*カウンターまでドリンクを入れたとき*/
 				if (isInCounter())
 				{
 					phase = FINDING;
 				}
 				else
 				{
-					// armOpen();
 					goStraight(); // 直進
 				}
 				break;
 			}
 
-			/*他のドリンクを探すフェーズ*/
 			case FINDING:
 			{
 				findDrink(); // ドリンクを探す
@@ -193,10 +218,8 @@ void loop()
 				break;
 			}
 
-			/*検出したドリンクまで向かうフェーズ*/
 			case APPROACHING:
 			{
-				/*適当な距離までドリンクに近づく*/
 				if (getDistance(temp) <= DISTANCE_FOR_CARRYING)
 				{
 					distance_counter++; // ノイズ対策
@@ -213,7 +236,6 @@ void loop()
 				break;
 			}
 
-			/*ドリンクを持ち上げるフェーズ*/
 			case LIFTING:
 			{
 				armClose(); // アームを閉じる
@@ -223,7 +245,6 @@ void loop()
 				break;
 			}
 
-			/*ドリンクを置くテーブルを探すフェーズ*/
 			case SEARCHING:
 			{
 				findTable(); // テーブルを探す
@@ -231,10 +252,8 @@ void loop()
 				break;
 			}
 
-			/*テーブルまでドリンクを運ぶフェーズ*/
 			case CARRYING:
 			{
-				/*適当な距離までテーブルに近づく*/
 				if (getDistance(temp) <= DISTANCE_FOR_CARRYING)
 				{
 					distance_counter++; // ノイズ対策
@@ -251,13 +270,11 @@ void loop()
 				break;
 			}
 
-			/*テーブルの温度を調べるフェーズ*/
 			case CHECKING:
 			{
 				delay(CHECKING_TEMPERATURE_TIME);
 				int temp = getTemp();
 
-				/*テーブルの温度がHOTであればLEDをオンに*/
 				if (temp >= HOT_TEMP)
 				{
 					LED_ON();
@@ -267,12 +284,10 @@ void loop()
 					LED_OFF();
 				}
 
-				/*テーブルの温度とドリンクの色が一致*/
 				if ((temp >= HOT_TEMP && DrinkIsBlack()) || (temp < HOT_TEMP && !DrinkIsBlack()))
 				{
 					phase = PUTTING;
 				}
-				/*テーブルの温度とドリンクの色が一致しない*/
 				else
 				{
 					phase = SEARCHING;
@@ -280,7 +295,6 @@ void loop()
 				break;
 			}
 
-			/*テーブルにドリンクを置くフェーズ*/
 			case PUTTING:
 			{
 				armDown(); // アームを下ろす
@@ -288,7 +302,6 @@ void loop()
 				goBack();  // 後退する
 
 				achievement_flag++; // 達成フラグを1増やす
-				/*2つのドリンクを正しくテーブルに乗せた*/
 				if (achievement_flag >= 2)
 				{
 					phase = SUCCESS;
@@ -300,13 +313,13 @@ void loop()
 				break;
 			}
 
-			/*成功後のフェーズ*/
 			case SUCCESS:
 			{
 				Success();
 				break;
 			}
 		}
+  */
 	}
 	/*遠隔操縦*/
 	else if (mode == MANUAL)
@@ -431,12 +444,17 @@ bool isInCounter()
 void findDrink()
 {
 	// TODO: 要議論（どうやって探すか，既に運び終わったドリンクをどうやって見分けるか）・要編集
+ while(getDistance() < 2000)
+ {
+   setSpeed(255, -255);
+ }
 }
 
 /*テーブルを探す→探し終えたら終了*/
 void findTable()
 {
 	// TODO: 要議論（どうやって探すか，既にドリンクが置いてあるテーブルをどうやって見分けるか，目の前にあるテーブルともう一つのテーブルをどうやって見分けるか）・要編集
+ 
 }
 
 /*両タイヤを与えられたスピード（-255~255）に設定*/
@@ -495,6 +513,18 @@ void goStraight()
 	setSpeed(speed[LEFT], speed[RIGHT]);
 }
 
+void turnLeft()
+{
+  setSpeed(-255, 255);
+  delay(TURN_TIME);
+}
+
+void turnRight()
+{
+ setSpeed(255, -255);
+ delay(TURN_TIME);
+}
+
 /*補正しつつ後退*/
 void goBack()
 {
@@ -516,12 +546,6 @@ void goBack()
 	}
 
 	setSpeed(speed[LEFT], speed[RIGHT]);
-}
-
-/*与えられた角度（-180[deg]~180[deg]に回転）*/
-void rotate(int angle)
-{
-	// TODO: 要編集
 }
 
 /*ドリンクの色を判定*/
